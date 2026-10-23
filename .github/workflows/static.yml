@@ -44,8 +44,10 @@ jobs:
       - name: Upload artifact
         uses: actions/upload-pages-artifact@v3
         with:
-          # Upload entire repository
-          path: '.'
+          # Publish the built site itself at the Pages root. The Vite bundle
+          # references ./assets/*, so publishing the repository root serves
+          # a stale index.html with hashes that no longer exist.
+          path: 'web'
       - name: Deploy to GitHub Pages
         id: deployment
         uses: actions/deploy-pages@v5
