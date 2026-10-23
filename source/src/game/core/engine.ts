@@ -3106,10 +3106,12 @@ export function mountMatch(
     const dy = _rayD.y;
     const dz = _rayD.z;
     const maxRange = CELL * 4;
+    const fallbackDistance = CELL * 1.4;
     let bestT = maxRange;
-    let bx = ox + dx * maxRange * 0.82;
-    let by = oy + dy * maxRange * 0.82;
-    let bz = oz + dz * maxRange * 0.82;
+    // Looking into open sky should still preview the next buildable tile, not jump four tiles away.
+    let bx = ox + dx * fallbackDistance;
+    let by = oy + dy * fallbackDistance;
+    let bz = oz + dz * fallbackDistance;
     let source: "build" | "ground" | "range" = "range";
 
     if (dirty && collisionSignature() !== collSig) rebuild();
@@ -3172,7 +3174,7 @@ export function mountMatch(
       }
     }
 
-    return { x: bx, y: by, z: bz, distance: bestT, source };
+    return { x: bx, y: by, z: bz, distance: source === "range" ? fallbackDistance : bestT, source };
   }
 
   function placement(): { ix: number; iy: number; iz: number; rot: number; base: number; ok: boolean; why: string } | null {
