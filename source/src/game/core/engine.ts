@@ -3179,94 +3179,99 @@ export function mountMatch(
 
   function placement(): { ix: number; iy: number; iz: number; rot: number; base: number; ok: boolean; why: string } | null {
     if (!buildKind || drop) return null;
+
     const target = buildAimPoint();
-    const pcx = Math.floor(player.x / CELL);
-    const pcz = Math.floor(player.z / CELL);
-    const targetX = Math.floor(target.x / CELL);
-    const targetZ = Math.floor(target.z / CELL);
-    const d = facingRot();
+    const playerCellX = Math.floor(player.x / CELL);
+    const playerCellZ = Math.floor(player.z / CELL);
+    const targetCellX = Math.floor(target.x / CELL);
+    const targetCellZ = Math.floor(target.z / CELL);
+    const facing = facingRot();
     const dx = [0, 1, 0, -1];
     const dz = [1, 0, -1, 0];
-
-    let ix = targetX;
-    let iz = targetZ;
-    let rot = buildKind === "wall" || buildKind === "ramp" ? d : 0;
-    rot = (rot + userRot) & 3;
-
-    if (buildKind === "wall") {
-      // Walls sit on the near edge of the targeted grid cell. If the crosshair is on our current
-      // tile (or behind us), move to the facing edge of the adjacent tile instead of putting a wall
-      // behind the player. Orientation stays cardinal and follows the character/camera facing.
-      const wallDir = rot;
-      const forward = (targetX - pcx) * dx[wallDir]! + (targetZ - pcz) * dz[wallDir]!;
-      if (forward <= 0) {
-        ix = pcx + dx[wallDir]!;
-        iz = pcz + dz[wallDir]!;
-      }
-    }
-
-    const fit = groundFit(buildKind, ix, iz, rot);
-    const centerY =
-      buildKind === "wall" ? CELL_H * 0.5 :
-      buildKind === "floor" ? TH * 0.5 :
-      buildKind === "pyramid" ? PYR_H * 0.45 : CELL_H * 0.42;
-    const targetBase = Math.round((target.y - centerY) / CELL_H) * CELL_H;
-    const levels = new Set<number>();
-    const addLevel = (v: number) => {
-      if (Number.isFinite(v) && v >= -0.45 && v <= player.y + CELL_H * 5 + 2) {
-        levels.add(Math.round(v * 1000) / 1000);
-      }
-    };
-
-    // Try the aimed vertical layer first, while retaining terrain and connected-build snap points.
-    for (let layer = -2; layer <= 2; layer++) addLevel(targetBase + layer * CELL_H);
-    if (fit > -8) addLevel(Math.max(0, fit));
-    addLevel(connectBase(ix, iz, buildKind, rot, 0));
-    addLevel(Math.round(player.y / CELL_H) * CELL_H);
-    addLevel(Math.round(player.y / CELL_H) * CELL_H + CELL_H);
-
-    // Neighbouring structures provide the same-height and top-edge snap points Fortnite-style
-    // building needs for ramp rushes, stacking walls, and continuing structures above ground.
-    for (const p of pieces) {
-      if (Math.abs(p.ix - ix) > 1 || Math.abs(p.iz - iz) > 1) continue;
-      addLevel(p.base);
-      if (p.kind !== "floor") addLevel(p.base + CELL_H);
-    }
-
-    const preferred = target.source === "ground" && fit > -8 ? Math.max(0, fit) : targetBase;
-    const orderedLevels = [...levels].sort((a, b) => Math.abs(a - preferred) - Math.abs(b - preferred));
+    const rotation = ((buildKind === "wall" || buildKind === "ramp" ? facing : 0) + userRot) & 3;
+    // Build levels are selected by the crosshair's vertical midpoint, not by the visual mesh centre.
+    const targetLayer = Math.floor((target.y + CELL_H * 0.5) / CELL_H) * CELL_H;
     const maxReach = CELL * 4.1;
-    let fallbackBase = orderedLevels[0] ?? (fit > -8 ? Math.max(0, fit) : targetBase);
-    let fallbackWhy = "support";
 
-    for (const base of orderedLevels) {
-      const [ax, az] = pieceAnchor(buildKind, ix, iz, rot);
-      if (Math.hypot(ax - player.x, az - player.z) > maxReach) {
-        fallbackWhy = "range";
+    type SnapCell = { ix: number; iz: number; rot: number; error: number; isTargetCell: boolean };
+    const snaps: SnapCell[] = [];
+    for (let ox = -1; ox <= 1; ox++) {
+      for (let oz = -1; oz <= 1; oz++) {
+        const ix = targetCellX + ox;
+        const iz = targetCellZ + oz;
+        const [ax, az] = pieceAnchor(buildKind, ix, iz, rotation);
+        const error = Math.hypot(ax - target.x, az - target.z);
+        // A neighbouring grid point is only a candidate when it is physically close to the aim point.
+        if (error > CELL * 1.05) continue;
+        snaps.push({ ix, iz, rot: rotation, error, isTargetCell: ix === targetCellX && iz === targetCellZ });
+      }
+    }
+    // The cell containing the hit wins exact ties, avoiding flicker when the cursor sits on a seam.
+    snaps.sort((a, b) => a.error - b.error || Number(b.isTargetCell) - Number(a.isTargetCell));
+    if (!snaps.length) {
+      const fit = groundFit(buildKind, targetCellX, targetCellZ, rotation);
+      const base = fit > -8 ? Math.max(0, fit) : targetLayer;
+      return { ix: targetCellX, iy: Math.round(base / CELL_H), iz: targetCellZ, rot: rotation, base, ok: false, why: "snap" };
+    }
+
+    const materialsOk = infinite || preT > 0 || mats[curMat] >= 10;
+    let invalid: { ix: number; iz: number; rot: number; base: number; why: string } | null = null;
+    for (const snap of snaps) {
+      const { ix, iz, rot } = snap;
+      const fit = groundFit(buildKind, ix, iz, rot);
+      const cx = (ix + 0.5) * CELL;
+      const cz = (iz + 0.5) * CELL;
+      const levels = new Set<number>();
+      const addLevel = (value: number) => {
+        if (!Number.isFinite(value) || value < -0.45 || value > player.y + CELL_H * 5 + 2) return;
+        levels.add(Math.round(value * 1000) / 1000);
+      };
+
+      // Try the crosshair layer and immediately adjacent layers first; then supported terrain/build levels.
+      addLevel(targetLayer);
+      addLevel(targetLayer - CELL_H);
+      addLevel(targetLayer + CELL_H);
+      addLevel(targetLayer - CELL_H * 2);
+      addLevel(targetLayer + CELL_H * 2);
+      if (fit > -8) addLevel(Math.max(0, fit));
+      addLevel(connectBase(ix, iz, buildKind, rot, 0));
+      addLevel(surfaceAt(cx, cz, target.y + CELL_H, false));
+      addLevel(Math.round(player.y / CELL_H) * CELL_H);
+      addLevel(Math.round(player.y / CELL_H) * CELL_H + CELL_H);
+
+      // Nearby structures provide their own layer and top-layer snap points.
+      const neighbourPieces: Piece[] = [];
+      for (let gx = ix - 1; gx <= ix + 1; gx++) {
+        for (let gz = iz - 1; gz <= iz + 1; gz++) neighbourPieces.push(...cellPieces(gx, gz));
+      }
+      for (const p of new Set(neighbourPieces)) {
+        addLevel(p.base);
+        if (p.kind !== "floor") addLevel(p.base + CELL_H);
+      }
+
+      const preferred = target.source === "ground" && fit > -8 ? Math.max(0, fit) : targetLayer;
+      const orderedLevels = [...levels].sort((a, b) => Math.abs(a - preferred) - Math.abs(b - preferred));
+      const [anchorX, anchorZ] = pieceAnchor(buildKind, ix, iz, rot);
+      if (Math.hypot(anchorX - player.x, anchorZ - player.z) > maxReach) {
+        if (!invalid) invalid = { ix, iz, rot, base: orderedLevels[0] ?? preferred, why: "range" };
         continue;
       }
-      const hasSupport = playerSupport(buildKind, ix, iz, rot, base);
-      const isDuplicate = duplicate(buildKind, ix, iz, rot, base);
-      const hasMaterials = infinite || preT > 0 || mats[curMat] >= 10;
-      const overlaps = overlapsPlayer(buildKind, ix, iz, base, rot);
-      if (hasSupport && !isDuplicate && hasMaterials && !overlaps) {
-        return {
-          ix, iy: Math.round(base / CELL_H), iz, rot, base, ok: true,
-          why: "valid",
-        };
-      }
-      if (Math.abs(base - preferred) < Math.abs(fallbackBase - preferred)) {
-        fallbackBase = base;
-        fallbackWhy = !hasSupport ? "support" : isDuplicate ? "occupied" : !hasMaterials ? "materials" : "blocked";
+
+      for (const base of orderedLevels) {
+        const hasSupport = playerSupport(buildKind, ix, iz, rot, base);
+        const isDuplicate = duplicate(buildKind, ix, iz, rot, base);
+        const overlaps = overlapsPlayer(buildKind, ix, iz, base, rot);
+        const why = !hasSupport ? "support" : isDuplicate ? "occupied" : !materialsOk ? "materials" : overlaps ? "blocked" : "invalid";
+        if (hasSupport && !isDuplicate && materialsOk && !overlaps) {
+          return { ix, iy: Math.round(base / CELL_H), iz, rot, base, ok: true, why: "valid" };
+        }
+        if (!invalid) invalid = { ix, iz, rot, base, why };
       }
     }
 
-    // Invalid previews stay at the intended snap point and turn red, rather than silently sliding
-    // into a different nearby cell that the player wasn't actually aiming at.
-    return {
-      ix, iy: Math.round(fallbackBase / CELL_H), iz, rot, base: fallbackBase, ok: false,
-      why: fallbackWhy,
-    };
+    // Leave the red ghost on the closest intended grid point when no candidate is legal.
+    const rejected = invalid ?? { ix: targetCellX, iz: targetCellZ, rot: rotation, base: targetLayer, why: "support" };
+    return { ix: rejected.ix, iy: Math.round(rejected.base / CELL_H), iz: rejected.iz, rot: rejected.rot, base: rejected.base, ok: false, why: rejected.why };
   }
   function showGhost() {
     const spot = buildKind && player.alive && !ended ? placement() : null;
