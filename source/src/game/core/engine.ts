@@ -2121,23 +2121,29 @@ export function mountMatch(
   }
 
   function moveBody(b: { x: number; y: number; z: number; vx: number; vy: number; vz: number; grounded: boolean; crouch: boolean }, dt: number) {
-    const nx = b.x + b.vx * dt;
-    if (!blocked(nx, b.z, b.y, b.crouch)) b.x = nx;
-    else {
-      const step = surfaceAt(nx, b.z, b.y + 0.2);
-      if (step - b.y > 0 && step - b.y < 0.75 && !blocked(nx, b.z, step, b.crouch)) {
-        b.x = nx;
-        b.y = step;
-      } else b.vx = 0;
-    }
-    const nz = b.z + b.vz * dt;
-    if (!blocked(b.x, nz, b.y, b.crouch)) b.z = nz;
-    else {
-      const step = surfaceAt(b.x, nz, b.y + 0.2);
-      if (step - b.y > 0 && step - b.y < 0.75 && !blocked(b.x, nz, step, b.crouch)) {
-        b.z = nz;
-        b.y = step;
-      } else b.vz = 0;
+    // Sweep horizontal movement in short increments. At low FPS a single large position jump can skip
+    // straight across a thin build wall before the endpoint collision test ever touches it.
+    const steps = Math.max(1, Math.ceil(Math.max(Math.abs(b.vx * dt), Math.abs(b.vz * dt)) / 0.12));
+    const stepDt = dt / steps;
+    for (let i = 0; i < steps; i++) {
+      const nx = b.x + b.vx * stepDt;
+      if (!blocked(nx, b.z, b.y, b.crouch)) b.x = nx;
+      else {
+        const step = surfaceAt(nx, b.z, b.y + 0.2);
+        if (step - b.y > 0 && step - b.y < 0.75 && !blocked(nx, b.z, step, b.crouch)) {
+          b.x = nx;
+          b.y = step;
+        } else b.vx = 0;
+      }
+      const nz = b.z + b.vz * stepDt;
+      if (!blocked(b.x, nz, b.y, b.crouch)) b.z = nz;
+      else {
+        const step = surfaceAt(b.x, nz, b.y + 0.2);
+        if (step - b.y > 0 && step - b.y < 0.75 && !blocked(b.x, nz, step, b.crouch)) {
+          b.z = nz;
+          b.y = step;
+        } else b.vz = 0;
+      }
     }
     b.vy -= 27 * dt;
     b.y += b.vy * dt;
@@ -6713,7 +6719,13 @@ export function mountMatch(
     audio.play("material");
   }
   const onKeyUp = (e: KeyboardEvent) => keys.delete(e.code);
-  const onBlur = () => keys.clear();
+  const onBlur = () => {
+    keys.clear();
+    // Browsers can lose mouseup when focus or pointer lock changes, leaving the trigger stuck down.
+    mouse.l = mouse.r = mouse.m = false;
+    fireLatch = false;
+    prevFire = false;
+  };
   const onMouseDown = (e: MouseEvent) => {
     if (bagOpen || emoteWheel) return;
     if (e.button === 0) mouse.l = true;
@@ -6798,6 +6810,12 @@ export function mountMatch(
   };
   const onLockChange = () => {
     pointerLocked = document.pointerLockElement === canvas;
+    if (!pointerLocked) {
+      // Escape/browser pointer-lock exits can swallow mouseup; never carry a held trigger into the menu.
+      mouse.l = mouse.r = mouse.m = false;
+      fireLatch = false;
+      prevFire = false;
+    }
   };
 
   window.addEventListener("keydown", onKeyDown);
