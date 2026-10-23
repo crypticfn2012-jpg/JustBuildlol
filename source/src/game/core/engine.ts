@@ -1710,6 +1710,7 @@ export function mountMatch(
     const [ax, az] = pieceAnchor(kind, ix, iz, rot);
     const atMyLevel = Math.abs(player.y - base) < 1.2 && player.grounded;
     for (const p of pieces) {
+      if (p.hp <= 0 || p.mask === 0) continue;
       const [bx, bz] = pieceAnchor(p.kind, p.ix, p.iz, p.rot);
       const gap = Math.hypot(ax - bx, az - bz);
       if (gap > CELL * 1.05) continue;
@@ -1751,6 +1752,7 @@ export function mountMatch(
     if (gHi > -8 && base <= gHi + 0.9 && base >= gLo - (CELL_H - 0.05)) return true;
     if (groundOnly) return false;
     for (const p of pieces) {
+      if (p.hp <= 0 || p.mask === 0) continue;
       if (Math.abs(p.ix - ix) + Math.abs(p.iz - iz) > 1) continue;
       if (Math.abs(p.base - base) <= 0.05) return true;
       // the top edge of a neighbouring wall, ramp or cone also holds a piece (floor off the top of a ramp)
@@ -3033,6 +3035,7 @@ export function mountMatch(
     // of a box, the floor inside it and the stairs next to it all count as touching and share one level
     const [ax, az] = pieceAnchor(kind, ix, iz, rot);
     for (const p of pieces) {
+      if (p.hp <= 0 || p.mask === 0) continue;
       const [bx, bz] = pieceAnchor(p.kind, p.ix, p.iz, p.rot);
       const gap = Math.hypot(ax - bx, az - bz);
       if (gap > CELL * 1.05) continue;
@@ -6895,20 +6898,24 @@ export function mountMatch(
     if (bagOpen) return;
     if (previewEditKind && e.code !== st.binds.edit && e.code !== st.binds.resetEdit && e.code !== "Escape") return;
     if (e.code === st.binds.wall) {
-      buildKind = buildKind === "wall" ? null : "wall";
+      buildKind = "wall";
       editPiece = -1;
+      previewEditKind = null;
     }
     if (e.code === st.binds.floor) {
-      buildKind = buildKind === "floor" ? null : "floor";
+      buildKind = "floor";
       editPiece = -1;
+      previewEditKind = null;
     }
     if (e.code === st.binds.ramp) {
-      buildKind = buildKind === "ramp" ? null : "ramp";
+      buildKind = "ramp";
       editPiece = -1;
+      previewEditKind = null;
     }
     if (e.code === st.binds.roof) {
-      buildKind = buildKind === "pyramid" ? null : "pyramid";
+      buildKind = "pyramid";
       editPiece = -1;
+      previewEditKind = null;
     }
     const slots: [string, number][] = [
       [st.binds.slot1, 0],
