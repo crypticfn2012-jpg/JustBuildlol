@@ -3181,13 +3181,9 @@ export function mountMatch(
     if (!buildKind || drop) return null;
 
     const target = buildAimPoint();
-    const playerCellX = Math.floor(player.x / CELL);
-    const playerCellZ = Math.floor(player.z / CELL);
     const targetCellX = Math.floor(target.x / CELL);
     const targetCellZ = Math.floor(target.z / CELL);
     const facing = facingRot();
-    const dx = [0, 1, 0, -1];
-    const dz = [1, 0, -1, 0];
     const rotation = ((buildKind === "wall" || buildKind === "ramp" ? facing : 0) + userRot) & 3;
     // Build levels are selected by the crosshair's vertical midpoint, not by the visual mesh centre.
     const targetLayer = Math.floor((target.y + CELL_H * 0.5) / CELL_H) * CELL_H;
