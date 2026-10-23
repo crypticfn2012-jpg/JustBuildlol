@@ -637,19 +637,27 @@ export function mountMatch(
   const mode: ModeDef = modeById(opts.modeId);
   const audio: AudioBus = createAudio();
   const settings0 = opts.getSettings();
+  // Keep integrated GPUs cool by default. Device hints are advisory; quality settings still
+  // control the look, while adaptive resolution below can react to real frame-time pressure.
+  const cores = navigator.hardwareConcurrency || 8;
+  const memory = (navigator as Navigator & { deviceMemory?: number }).deviceMemory || 8;
+  const lowEndDevice = cores <= 4 || memory <= 4 || /Android|iPhone|iPad/i.test(navigator.userAgent);
+  const maxPixelRatio = lowEndDevice ? 0.9 : settings0.quality === "high" ? 1.4 : settings0.quality === "low" ? 0.85 : 1.05;
   // no music in battle royale (sound effects only); 1v1 keeps the music setting
   audio.setVolumes(settings0.master, mode.map === "island" ? 0 : settings0.music, settings0.sfx);
 
   const renderer = new THREE.WebGLRenderer({
     canvas,
-    antialias: settings0.quality !== "low",
+    antialias: settings0.quality === "high" && !lowEndDevice,
     alpha: false,
-    powerPreference: "high-performance",
+    powerPreference: lowEndDevice ? "low-power" : "high-performance",
+    stencil: false,
+    depth: true,
   });
   renderer.outputColorSpace = THREE.SRGBColorSpace;
   renderer.toneMapping = THREE.ACESFilmicToneMapping;
   renderer.toneMappingExposure = 1.05;
-  renderer.shadowMap.enabled = settings0.shadows && settings0.quality !== "low";
+  renderer.shadowMap.enabled = settings0.shadows && settings0.quality !== "low" && !lowEndDevice;
   renderer.shadowMap.type = THREE.PCFShadowMap;
   renderer.setClearColor(0x8ec8f2);
 
@@ -665,7 +673,8 @@ export function mountMatch(
   const sun = new THREE.DirectionalLight(0xfff6dc, 1.45);
   sun.position.set(48, 90, 26);
   sun.castShadow = renderer.shadowMap.enabled;
-  sun.shadow.mapSize.set(settings0.quality === "high" ? 2048 : 1024, settings0.quality === "high" ? 2048 : 1024);
+  const shadowResolution = lowEndDevice ? 512 : settings0.quality === "high" ? 2048 : 1024;
+  sun.shadow.mapSize.set(shadowResolution, shadowResolution);
   sun.shadow.camera.left = -26;
   sun.shadow.camera.right = 26;
   sun.shadow.camera.top = 26;
@@ -6425,9 +6434,10 @@ export function mountMatch(
     const buildLocked = !!duel && (duel.freeze > 0 || duel.over > 0);
     if (buildKind && editPiece < 0 && !buildLocked && (mouse.l || opts.pad.fire)) {
       placeHold += dt;
-      if (placeHold === dt || placeHold > 0.12) {
+      // Fortnite-like turbo building: place immediately, then repeat at a stable 10 builds/second.
+      if (placeHold === dt || placeHold >= 0.1) {
         placePlayerBuild();
-        if (placeHold > 0.12) placeHold = 0.02;
+        if (placeHold >= 0.1) placeHold %= 0.1;
       }
     } else placeHold = 0;
     // hold to keep swinging, like Fortnite
@@ -6480,6 +6490,11 @@ export function mountMatch(
 
   function frame(now: number) {
     raf = requestAnimationFrame(frame);
+    // Don't simulate/render a hidden tab. Reset the clock so returning to the game never causes a hitch.
+    if (document.hidden) {
+      last = now;
+      return;
+    }
     // rAF timestamps can predate the end of a long mount (island generation), so never go negative
     const dt = Math.min(0.05, Math.max(0, (now - last) / 1000));
     last = now;
@@ -6490,6 +6505,37 @@ export function mountMatch(
       fpsAcc = 0;
     }
     fpsSmoothed = fpsSmoothed * 0.9 + (1 / Math.max(0.001, dt)) * 0.1;
+    // Dynamically reduce GPU fill-rate on struggling machines, then gently recover when stable.
+    // Only adapt when the player hasn't explicitly capped FPS.
+    if (limit === 0 && settings0.quality !== "low") {
+      adaptiveTimer += dt;
+      if (adaptiveTimer >= 2) {
+        adaptiveTimer = 0;
+        if (fpsSmoothed < 48) {
+          lowFpsTimer += 2;
+          highFpsTimer = 0;
+        } else if (fpsSmoothed > 58) {
+          highFpsTimer += 2;
+          lowFpsTimer = 0;
+        } else {
+          lowFpsTimer = Math.max(0, lowFpsTimer - 1);
+          highFpsTimer = 0;
+        }
+        let nextRatio = currentPixelRatio;
+        if (lowFpsTimer >= 2 && currentPixelRatio > 0.65) {
+          nextRatio = Math.max(0.65, currentPixelRatio - 0.1);
+          lowFpsTimer = 0;
+        } else if (highFpsTimer >= 6 && currentPixelRatio < Math.min(window.devicePixelRatio || 1, maxPixelRatio)) {
+          nextRatio = Math.min(Math.min(window.devicePixelRatio || 1, maxPixelRatio), currentPixelRatio + 0.05);
+          highFpsTimer = 0;
+        }
+        if (Math.abs(nextRatio - currentPixelRatio) > 0.01) {
+          currentPixelRatio = nextRatio;
+          renderer.setPixelRatio(currentPixelRatio);
+          renderer.setSize(canvas.clientWidth || window.innerWidth, canvas.clientHeight || window.innerHeight, false);
+        }
+      }
+    }
     const st = opts.getSettings();
     audio.setVolumes(st.master, island ? 0 : st.music, st.sfx);
     if (!paused && !ended && !testHold) simulate(dt, st);
@@ -6556,14 +6602,21 @@ export function mountMatch(
   let prevReload = false;
   let placeHold = 0;
   let fpsAcc = 0;
+  let adaptiveTimer = 0;
+  let lowFpsTimer = 0;
+  let highFpsTimer = 0;
   let last = performance.now();
   let raf = 0;
 
+  let currentPixelRatio = 0;
   function resize() {
     const w = canvas.clientWidth || window.innerWidth;
     const h = canvas.clientHeight || window.innerHeight;
-    const pr = settings0.quality === "low" ? 1 : Math.min(window.devicePixelRatio || 1, settings0.quality === "high" ? 1.6 : 1.25);
-    renderer.setPixelRatio(pr);
+    const pr = Math.min(window.devicePixelRatio || 1, maxPixelRatio);
+    if (Math.abs(pr - currentPixelRatio) > 0.01) {
+      currentPixelRatio = pr;
+      renderer.setPixelRatio(pr);
+    }
     renderer.setSize(w, h, false);
     camera.aspect = w / Math.max(1, h);
     camera.updateProjectionMatrix();
