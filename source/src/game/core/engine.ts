@@ -1113,6 +1113,10 @@ export function mountMatch(
   const ghostWall = new THREE.Mesh(ghostWallGeo, ghostWallMat);
   const ghostFloor = new THREE.Mesh(ghostFloorGeo, ghostMat);
   const ghostPyr = new THREE.Mesh(lolConeFull, ghostMat);
+  const ghostWallGeometries = new Map<number, THREE.BufferGeometry>([[0b111111111, ghostWallGeo]]);
+  const ghostFloorGeometries = new Map<number, THREE.BufferGeometry>([[0b1111, ghostFloorGeo]]);
+  const ghostPyramidGeometries = new Map<number, THREE.BufferGeometry>([[0b1111, lolConeFull]]);
+  let ghostRampShapeKey = "";
   ghostWall.add(new THREE.LineSegments(new THREE.EdgesGeometry(wallBox), ghostLine));
   ghostFloor.add(new THREE.LineSegments(new THREE.EdgesGeometry(floorBox), ghostLine));
   ghostPyr.add(new THREE.LineSegments(new THREE.EdgesGeometry(lolConeFull, 40), ghostLine));
@@ -1826,6 +1830,12 @@ export function mountMatch(
   }
   let slot = 1;
   let buildKind: BuildKind | null = null;
+  // Persistent classic build-preview edits, applied to future pieces of each type.
+  const previewMasks: Record<BuildKind, number> = {
+    wall: fullMask("wall"), floor: fullMask("floor"), ramp: fullMask("ramp"), pyramid: fullMask("pyramid"),
+  };
+  let previewRamp: StairSeg[] | undefined;
+  let previewEditKind: BuildKind | null = null;
   let userRot = 0;
   let editPiece = -1;
   let editDrag = false;
@@ -2012,7 +2022,8 @@ export function mountMatch(
       iz,
       rot,
       base,
-      mask: fullMask(kind),
+      mask: owner === 0 ? previewMasks[kind] : fullMask(kind),
+      stair: owner === 0 && kind === "ramp" ? previewRamp : undefined,
       hp: dur > 0 ? Math.round(max * 0.1) : max,
       max,
       owner,
@@ -3125,6 +3136,8 @@ export function mountMatch(
       const index = pieceFromIntersect(h);
       if (index < 0 || h.distance >= bestT) continue;
       const p = pieces[index];
+      // Walls and floors may be targeted through stairs; ramps and cones require line of sight.
+      if (p && (buildKind === "wall" || buildKind === "floor") && p.kind === "ramp") continue;
       // Don't let the floor/ramp directly under the player hijack forward placement.
       if (p && !lookingDown && underPlayer(p)) continue;
       bestT = h.distance;
@@ -3269,8 +3282,58 @@ export function mountMatch(
     const rejected = invalid ?? { ix: targetCellX, iz: targetCellZ, rot: rotation, base: targetLayer, why: "support" };
     return { ix: rejected.ix, iy: Math.round(rejected.base / CELL_H), iz: rejected.iz, rot: rejected.rot, base: rejected.base, ok: false, why: rejected.why };
   }
+  function syncGhostShapes() {
+    const wallMask = previewMasks.wall;
+    if (!ghostWallGeometries.has(wallMask)) {
+      const def = LOL_WALLS[wallMask];
+      const geo = def ? lolWallGeo(def, 0) : wallGeo(wallMask, 0);
+      ghostWallGeometries.set(wallMask, geo.translate(0, -CELL_H / 2, 0));
+    }
+    ghostWall.geometry = ghostWallGeometries.get(wallMask)!;
+
+    const floorMask = previewMasks.floor;
+    if (!ghostFloorGeometries.has(floorMask)) {
+      const def = lolFloorFor(floorMask);
+      if (def) ghostFloorGeometries.set(floorMask, lolFloorGeo(def, TH).translate(0, -TH / 2, 0));
+      else ghostFloorGeometries.set(floorMask, ghostFloorGeo);
+    }
+    ghostFloor.geometry = ghostFloorGeometries.get(floorMask)!;
+
+    const coneMask = previewMasks.pyramid;
+    if (!ghostPyramidGeometries.has(coneMask)) {
+      const def = lolConeFor(coneMask);
+      ghostPyramidGeometries.set(coneMask, def ? lolConeGeo(def) : roofGeo(coneMask));
+    }
+    ghostPyr.geometry = ghostPyramidGeometries.get(coneMask)!;
+    const coneLines = ghostPyr.children.find((child) => child instanceof THREE.LineSegments) as THREE.LineSegments | undefined;
+    if (coneLines && coneLines.geometry !== ghostPyramidGeometries.get(coneMask)) {
+      coneLines.geometry.dispose();
+      coneLines.geometry = new THREE.EdgesGeometry(ghostPyr.geometry, 40);
+    }
+
+    const rampKey = `${previewMasks.ramp}:${previewRamp ? previewRamp.map((seg) => `${seg.t}-${seg.d}`).join(",") : "plain"}`;
+    if (rampKey !== ghostRampShapeKey) {
+      for (const child of [...rampGhost.children]) {
+        for (const line of child.children) if (line instanceof THREE.LineSegments) line.geometry.dispose();
+      }
+      rampGhost.clear();
+      const addRamp = (geo: THREE.BufferGeometry) => {
+        const mesh = new THREE.Mesh(geo, ghostMat);
+        mesh.add(new THREE.LineSegments(new THREE.EdgesGeometry(geo, 40), ghostLine));
+        rampGhost.add(mesh);
+      };
+      if (previewRamp?.length) {
+        const def = lolStairFor(previewRamp.map((seg) => seg.t));
+        addRamp(def ? lolStairGeo(def) : geoCached(`s${stairKey(previewRamp)}`, false, () => stairGeo(previewRamp!)));
+      } else if (previewMasks.ramp === 0b1111) addRamp(lolRampFull);
+      else for (let bit = 0; bit < 4; bit++) if (previewMasks.ramp & (1 << bit)) addRamp(rampGeos[bit]!);
+      ghostRampShapeKey = rampKey;
+    }
+  }
+
   function showGhost() {
-    const spot = buildKind && player.alive && !ended ? placement() : null;
+    syncGhostShapes();
+    const spot = buildKind && previewEditKind === null && player.alive && !ended ? placement() : null;
     ghostWall.visible = false;
     ghostFloor.visible = false;
     ghostPyr.visible = false;
@@ -3351,8 +3414,21 @@ export function mountMatch(
     mesh.visible = true;
   }
 
+  function previewEditTarget(): Piece | undefined {
+    if (!previewEditKind || buildKind !== previewEditKind) return undefined;
+    const spot = placement();
+    if (!spot) return undefined;
+    return {
+      kind: previewEditKind, ix: spot.ix, iy: spot.iy, iz: spot.iz,
+      rot: spot.rot, base: spot.base, mask: previewMasks[previewEditKind],
+      hp: 1, max: 1, owner: 0, team: player.team, mat: curMat,
+      buildT: 0, buildDur: 1, age: 1, hitT: 0,
+      stair: previewEditKind === "ramp" ? previewRamp : undefined,
+    };
+  }
+
   function syncEditChrome() {
-    const p = editPiece >= 0 ? pieces[editPiece] : undefined;
+    const p = editPiece >= 0 ? pieces[editPiece] : previewEditKind ? previewEditTarget() : undefined;
     if (!p) {
       for (const m of editBars) m.visible = false;
       for (const m of editCells) m.visible = false;
@@ -3538,6 +3614,10 @@ export function mountMatch(
   }
 
   function toggleEdit() {
+    if (previewEditKind) {
+      confirmPreviewEdit();
+      return;
+    }
     if (editPiece >= 0) {
       if (editMask) confirmEdit();
       leaveEdit();
@@ -3564,6 +3644,16 @@ export function mountMatch(
               ? "Pick tiles to cut · bottom two = door · release to confirm"
               : "Pick tiles to cut · release to confirm · right-click resets",
       );
+    } else if (buildKind) {
+      previewEditKind = buildKind;
+      editDrag = false;
+      editMask = 0;
+      editOrder = [];
+      dirty = true;
+      audio.play("edit");
+      say(buildKind === "ramp" ? "Edit ramp preview · drag a path, then release" :
+          buildKind === "pyramid" ? "Edit cone preview · select corners, then release" :
+          "Edit build preview · select tiles, then release");
     } else say("Look at your build");
   }
 
@@ -3685,8 +3775,7 @@ export function mountMatch(
   }
 
   function editClick() {
-    if (editPiece < 0) return;
-    const p = pieces[editPiece];
+    const p = editPiece >= 0 ? pieces[editPiece] : previewEditKind ? previewEditTarget() : undefined;
     if (!p) return;
     viewRay(_rayO, _rayD);
     const tile = tileOnPiece(p, _rayO.x, _rayO.y, _rayO.z, _rayD.x, _rayD.y, _rayD.z);
@@ -3709,12 +3798,53 @@ export function mountMatch(
     if (!p.doors.length) p.doors = undefined;
   }
 
+  function confirmPreviewEdit() {
+    const kind = previewEditKind;
+    if (!kind) return;
+    editDrag = false;
+    let ok = true;
+    if (editMask !== 0) {
+      if (kind === "ramp") {
+        const res = stairFromPath(editOrder);
+        if (!res) ok = false;
+        else if ("redirect" in res) {
+          const facing = facingRot();
+          const yaw = ((facing + userRot) & 3) * (Math.PI / 2);
+          const [dx, dz] = [[0, 1], [1, 0], [0, -1], [-1, 0]][res.redirect]!;
+          const wx = dx * Math.cos(yaw) + dz * Math.sin(yaw);
+          const wz = -dx * Math.sin(yaw) + dz * Math.cos(yaw);
+          const rotated = ((Math.round(Math.atan2(wx, wz) / (Math.PI / 2)) % 4) + 4) % 4;
+          userRot = (rotated - facing + 4) & 3;
+          previewMasks.ramp = fullMask("ramp");
+          previewRamp = undefined;
+        } else {
+          const next = res.segs.reduce((mask, seg) => mask | (1 << seg.t), 0);
+          if (!next) ok = false;
+          else { previewRamp = res.segs; previewMasks.ramp = next; }
+        }
+      } else {
+        const next = previewMasks[kind] ^ editMask;
+        if (next === 0 || (kind === "floor" && !lolFloorFor(next))) ok = false;
+        else previewMasks[kind] = next;
+      }
+    }
+    editMask = 0;
+    editOrder = [];
+    previewEditKind = null;
+    dirty = true;
+    syncGhostShapes();
+    if (ok) { audio.play("editDone"); say("Preview edit saved"); }
+    else { audio.play("empty"); say("That edit shape isn't valid"); }
+  }
+
   function confirmEdit(exitAfter = false) {
     const p = pieces[editPiece];
     editDrag = false;
     if (!p || editMask === 0) {
       editMask = 0;
+      editOrder = [];
       dirty = true;
+      if (exitAfter) leaveEdit();
       return;
     }
     let ok = true;
@@ -3741,8 +3871,8 @@ export function mountMatch(
       }
     } else {
       const next = p.mask ^ editMask;
-      // Fortnite won't let an edit remove every tile
-      if (next === 0) ok = false;
+      // Only accept floor masks with real geometry; invalid masks used to make edited floors disappear.
+      if (next === 0 || (p.kind === "floor" && !lolFloorFor(next))) ok = false;
       else {
         p.mask = next;
         syncDoors(p);
@@ -3751,8 +3881,9 @@ export function mountMatch(
     editMask = 0;
     editOrder = [];
     if (ok) {
-      // brief white flash on the reshaped piece
+      // Removing a support connection can make upper structures collapse.
       p.hitT = 0.1;
+      if (collapseUnsupported() > 0) audio.play("break");
       audio.play("editDone");
     } else audio.play("empty");
     if (exitAfter) leaveEdit();
@@ -6515,19 +6646,20 @@ export function mountMatch(
     // building and editing own the trigger: the pickaxe / gun only fires on a fresh press after them, so
     // placing or confirming an edit never punches (or shoots) the piece you just made
     const trigger = mouse.l || opts.pad.fire;
-    if (buildKind || editPiece >= 0) fireLatch = trigger;
+    if (buildKind || editPiece >= 0 || previewEditKind !== null) fireLatch = trigger;
     else if (!trigger) fireLatch = false;
-    const fire = trigger && !fireLatch && !buildKind && editPiece < 0 && !drop && !driving;
-    if (editPiece >= 0 && (mouse.l || opts.pad.fire)) {
+    const fire = trigger && !fireLatch && !buildKind && editPiece < 0 && previewEditKind === null && !drop && !driving;
+    if ((editPiece >= 0 || previewEditKind !== null) && (mouse.l || opts.pad.fire)) {
       editDrag = true;
       editClick();
     } else if (editDrag) {
-      confirmEdit(true);
+      if (previewEditKind !== null) confirmPreviewEdit();
+      else confirmEdit(true);
     }
     const gun = currentGun();
     if (driving || (duel && (duel.freeze > 0 || duel.over > 0))) buildKind = buildKind && duel && !driving ? buildKind : null;
     const buildLocked = !!duel && (duel.freeze > 0 || duel.over > 0);
-    if (buildKind && editPiece < 0 && !buildLocked && (mouse.l || opts.pad.fire)) {
+    if (buildKind && editPiece < 0 && previewEditKind === null && !buildLocked && (mouse.l || opts.pad.fire)) {
       placeHold += dt;
       // Fortnite-like turbo building: place immediately, then repeat every 50 ms while held.
       if (placeHold === dt || placeHold >= 0.05) {
@@ -6759,6 +6891,7 @@ export function mountMatch(
       return;
     }
     if (bagOpen) return;
+    if (previewEditKind && e.code !== st.binds.edit && e.code !== st.binds.resetEdit && e.code !== "Escape") return;
     if (e.code === st.binds.wall) {
       buildKind = buildKind === "wall" ? null : "wall";
       editPiece = -1;
@@ -6794,8 +6927,12 @@ export function mountMatch(
     }
     if (e.code === st.binds.edit) toggleEdit();
     if (e.code === st.binds.resetEdit) {
-      if (editPiece >= 0) {
-        // reset the piece being edited and leave edit mode
+      if (previewEditKind) {
+        const kind = previewEditKind;
+        if (editMask) { editMask = 0; editOrder = []; }
+        else { previewMasks[kind] = fullMask(kind); if (kind === "ramp") previewRamp = undefined; syncGhostShapes(); }
+        dirty = true;
+      } else if (editPiece >= 0) {
         const p = pieces[editPiece];
         leaveEdit();
         if (p) restoreFull(p);
@@ -6837,8 +6974,13 @@ export function mountMatch(
     }
     if (e.button === 2) {
       mouse.r = true;
-      // right click: reset the edit (Fortnite default) or swap material while building
-      if (editPiece >= 0 && !paused && !ended) resetEdit();
+      // Right click resets a pending or saved preview edit before it cycles building materials.
+      if (previewEditKind && !paused && !ended) {
+        const kind = previewEditKind;
+        if (editMask) { editMask = 0; editOrder = []; }
+        else { previewMasks[kind] = fullMask(kind); if (kind === "ramp") previewRamp = undefined; syncGhostShapes(); }
+        dirty = true;
+      } else if (editPiece >= 0 && !paused && !ended) resetEdit();
       else if (buildKind && !paused && !ended) cycleMat();
     }
   };
@@ -6865,6 +7007,15 @@ export function mountMatch(
     e.preventDefault();
     const down = e.deltaY > 0;
     const wheelReset = opts.getSettings().binds.resetEdit === "MouseWheel";
+    if (previewEditKind) {
+      if (wheelReset) {
+        const kind = previewEditKind;
+        if (editMask) { editMask = 0; editOrder = []; }
+        else { previewMasks[kind] = fullMask(kind); if (kind === "ramp") previewRamp = undefined; syncGhostShapes(); }
+        dirty = true;
+      }
+      return;
+    }
     if (editPiece >= 0) {
       resetEdit();
       return;
