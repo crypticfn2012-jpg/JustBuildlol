@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" role="img" aria-label="Build Battle">
+  <rect width="32" height="32" rx="8" fill="#79C6F5"/>
+  <rect y="21" width="32" height="11" fill="#3FAE3C"/>
+  <polygon points="3,22 15,10 15,22" fill="#E8B15A"/>
+  <rect x="16" y="8" width="12" height="14" fill="#F0B429"/>
+  <rect x="18.5" y="11" width="7" height="3.2" fill="#0E4BA8"/>
+  <rect x="18.5" y="16" width="7" height="3.2" fill="#F4F7FB"/>
+</svg>
