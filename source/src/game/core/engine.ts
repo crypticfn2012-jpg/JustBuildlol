@@ -1116,6 +1116,7 @@ export function mountMatch(
   const ghostWallGeometries = new Map<number, THREE.BufferGeometry>([[0b111111111, ghostWallGeo]]);
   const ghostFloorGeometries = new Map<number, THREE.BufferGeometry>([[0b1111, ghostFloorGeo]]);
   const ghostPyramidGeometries = new Map<number, THREE.BufferGeometry>([[0b1111, lolConeFull]]);
+  let ghostPyramidOutlineMask = 0b1111;
   let ghostRampShapeKey = "";
   ghostWall.add(new THREE.LineSegments(new THREE.EdgesGeometry(wallBox), ghostLine));
   ghostFloor.add(new THREE.LineSegments(new THREE.EdgesGeometry(floorBox), ghostLine));
@@ -3306,9 +3307,10 @@ export function mountMatch(
     }
     ghostPyr.geometry = ghostPyramidGeometries.get(coneMask)!;
     const coneLines = ghostPyr.children.find((child) => child instanceof THREE.LineSegments) as THREE.LineSegments | undefined;
-    if (coneLines && coneLines.geometry !== ghostPyramidGeometries.get(coneMask)) {
+    if (coneLines && coneMask !== ghostPyramidOutlineMask) {
       coneLines.geometry.dispose();
       coneLines.geometry = new THREE.EdgesGeometry(ghostPyr.geometry, 40);
+      ghostPyramidOutlineMask = coneMask;
     }
 
     const rampKey = `${previewMasks.ramp}:${previewRamp ? previewRamp.map((seg) => `${seg.t}-${seg.d}`).join(",") : "plain"}`;
