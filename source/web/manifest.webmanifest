@@ -1,0 +1,12 @@
+{
+  "name": "Build Battle: Driftwood Royale",
+  "short_name": "Driftwood Royale",
+  "description": "Battle royale and 1v1 build fights in your browser.",
+  "start_url": "./",
+  "scope": "./",
+  "display": "fullscreen",
+  "orientation": "landscape",
+  "background_color": "#08357a",
+  "theme_color": "#0c4eab",
+  "icons": [{ "src": "./favicon.svg", "sizes": "any", "type": "image/svg+xml" }]
+}

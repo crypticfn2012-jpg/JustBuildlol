@@ -1,0 +1,38 @@
+{
+  "url": "http://127.0.0.1:8081/",
+  "viewports": {
+    "desktop": {
+      "width": 1280,
+      "height": 800,
+      "status": 200,
+      "title": "Build Battle",
+      "hasCanvas": true,
+      "bodyTextLen": 148,
+      "bodyTextHash": "08c97841310bdea02622a57f80751c3228d7d30f75298033193718b62e097833",
+      "bodyTextPrefix": "B 1 Builder Ready 40 $ 850 DAILY DROP Honey Scout kit Builder re",
+      "horizontalOverflow": false,
+      "consoleErrors": [],
+      "pageErrors": [],
+      "screenshot": "/workspace/screenshots/app-builder-built.png"
+    },
+    "mobile": {
+      "width": 390,
+      "height": 844,
+      "status": 200,
+      "title": "Build Battle",
+      "hasCanvas": true,
+      "bodyTextLen": 113,
+      "bodyTextHash": "2bf2f25d94fae4d519f935aa086b87b531469d85aa32b64c36caecf7e745171d",
+      "bodyTextPrefix": "B 1 Builder Ready 40 $ 850 Builder ready Zone Wars Wild West War",
+      "horizontalOverflow": false,
+      "consoleErrors": [],
+      "pageErrors": [],
+      "screenshot": "/workspace/screenshots/app-builder-built-mobile.png"
+    }
+  },
+  "brandWarnings": [],
+  "authWarnings": [],
+  "verdictFile": "/workspace/screenshots/app-builder-built.json",
+  "divergesFromBaseline": false,
+  "baselineReasons": []
+}

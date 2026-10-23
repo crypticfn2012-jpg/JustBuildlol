@@ -1,0 +1,104 @@
+@import "tailwindcss";
+
+@theme {
+  --color-bg: #0c4eab;
+  --color-bg-deep: #08357a;
+  --color-ink: #f3f7ff;
+  --color-muted: #c5d6f5;
+  --color-panel: #1d64c4;
+  --color-panel-2: #164fa3;
+  --color-line: #3c86e0;
+  --color-gold: #f0b429;
+  --color-gold-ink: #3a2800;
+  --color-play: #ffc44d;
+  --color-gem: #8ad7ff;
+  --color-hp: #3ddc6e;
+  --color-danger: #e23b3b;
+  --color-ok: #2fce73;
+  --font-display: "Lilita One", "Trebuchet MS", system-ui, sans-serif;
+  --font-sans: "Nunito", "Trebuchet MS", system-ui, sans-serif;
+  --radius: 0.9rem;
+}
+
+@layer base {
+  button:not(:disabled),
+  [role="button"]:not(:disabled) {
+    cursor: pointer;
+  }
+
+  html,
+  body,
+  #root {
+    height: 100%;
+  }
+
+  body {
+    margin: 0;
+    background: var(--color-bg-deep);
+    color: var(--color-ink);
+    font-family: var(--font-sans);
+    overflow: hidden;
+  }
+
+  button,
+  input {
+    font-family: inherit;
+  }
+}
+
+.hex-bg {
+  background-color: #1260c4;
+  background-image:
+    radial-gradient(900px 520px at 70% 20%, rgba(255, 255, 255, 0.14), transparent 60%),
+    radial-gradient(700px 500px at 10% 80%, rgba(8, 40, 110, 0.45), transparent 55%),
+    url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='84' height='48' viewBox='0 0 84 48'><path d='M21 1.5 41.5 13v23L21 47.5 0.5 36V13Z' fill='none' stroke='%23ffffff' stroke-opacity='0.13' stroke-width='1.4'/><path d='M63 1.5 83.5 13v23L63 47.5 42.5 36V13Z' fill='none' stroke='%23ffffff' stroke-opacity='0.13' stroke-width='1.4'/></svg>");
+}
+
+.font-display {
+  font-family: var(--font-display);
+  letter-spacing: 0.02em;
+}
+
+.range {
+  appearance: none;
+  height: 0.7rem;
+  width: 100%;
+  border-radius: 999px;
+  background: #0c3f86;
+  outline: none;
+}
+
+.range::-webkit-slider-thumb {
+  appearance: none;
+  height: 1.15rem;
+  width: 0.55rem;
+  border-radius: 0.2rem;
+  background: #d7ffe4;
+  border: 2px solid #1d9a4a;
+}
+
+.settings-scroll {
+  scrollbar-color: #8ec0ff transparent;
+  scrollbar-width: thin;
+}
+
+@keyframes pop-in {
+  from {
+    transform: translateY(8px) scale(0.98);
+    opacity: 0;
+  }
+  to {
+    transform: none;
+    opacity: 1;
+  }
+}
+
+.pop-in {
+  animation: pop-in 180ms ease-out;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .pop-in {
+    animation: none;
+  }
+}

@@ -1,0 +1,94 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no" />
+    <title>Build Battle: Driftwood Royale</title>
+    <meta name="description" content="Drop onto Driftwood Isle with 15 rivals, loot chests, build walls and ramps, and be the last one standing as the storm closes in." />
+    <!-- CrazyGames SDK v3: must load before the game code -->
+    <script src="https://sdk.crazygames.com/crazygames-sdk-v3.js"></script>
+    <style>
+      html,
+      body,
+      #root {
+        height: 100%;
+        margin: 0;
+      }
+      body {
+        background: #08357a;
+        overflow: hidden;
+        /* CrazyGames mobile requirement: no text selection, magnifier or callout */
+        -webkit-user-select: none;
+        -moz-user-select: none;
+        -ms-user-select: none;
+        user-select: none;
+        -webkit-touch-callout: none;
+        -webkit-tap-highlight-color: transparent;
+      }
+      #boot {
+        position: fixed;
+        inset: 0;
+        display: grid;
+        place-items: center;
+        color: #f3f7ff;
+        font-family: "Barlow Condensed", "Arial Narrow", "Trebuchet MS", system-ui, sans-serif;
+        background:
+          radial-gradient(ellipse at 50% 40%, rgba(120, 190, 255, 0.35), rgba(8, 53, 122, 0) 60%),
+          linear-gradient(180deg, #1f62e0 0%, #0c4eab 55%, #06163d 100%);
+      }
+      #boot .card {
+        text-align: center;
+        width: min(560px, 86vw);
+      }
+      #boot .title {
+        font-size: clamp(38px, 8vw, 72px);
+        line-height: 0.95;
+        font-style: italic;
+        text-transform: uppercase;
+        text-shadow: 0 4px 0 rgba(0, 0, 0, 0.35);
+      }
+      #boot .sub {
+        margin-top: 6px;
+        color: #ffd21f;
+        letter-spacing: 0.18em;
+        font-size: clamp(13px, 2.4vw, 18px);
+        text-transform: uppercase;
+      }
+      #boot .bar {
+        margin-top: 28px;
+        height: 14px;
+        border: 2px solid rgba(255, 255, 255, 0.75);
+        border-radius: 999px;
+        overflow: hidden;
+        background: rgba(0, 0, 0, 0.35);
+      }
+      #boot .bar i {
+        display: block;
+        height: 100%;
+        width: 40%;
+        border-radius: 999px;
+        background: linear-gradient(90deg, #ffd21f, #fff27a);
+        animation: boot-run 1.1s ease-in-out infinite;
+      }
+      #boot .hint {
+        margin-top: 10px;
+        font: 800 13px "Trebuchet MS", system-ui, sans-serif;
+        color: rgba(243, 247, 255, 0.75);
+        letter-spacing: 0.06em;
+      }
+      @keyframes boot-run {
+        0% {
+          transform: translateX(-100%);
+        }
+        100% {
+          transform: translateX(260%);
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <div id="root"><div id="boot"><div class="card"><div class="title">Driftwood Royale</div><div class="sub">Build · Loot · Survive</div><div class="bar"><i></i></div><div class="hint">Loading…</div></div></div></div>
+    <link rel="stylesheet" href="./assets/app.css" />
+    <script type="module" src="./assets/main.js"></script>
+  </body>
+</html>
