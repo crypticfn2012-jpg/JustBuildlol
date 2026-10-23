@@ -662,7 +662,7 @@ export function mountMatch(
   renderer.setClearColor(0x8ec8f2);
 
   const scene = new THREE.Scene();
-  const fogFar = settings0.renderDistance === "low" ? 90 : settings0.renderDistance === "high" ? 210 : 150;
+  const fogFar = lowEndDevice || settings0.renderDistance === "low" ? 90 : settings0.renderDistance === "high" ? 210 : 150;
   scene.fog = new THREE.Fog(0x7ec8f6, fogFar * 0.72, fogFar);
   scene.background = new THREE.Color(0x4aa4f0);
   const skyParts = addSky(scene);
@@ -693,7 +693,7 @@ export function mountMatch(
   const sandMap = makeSandMap();
 
   const map = mode.map;
-  const island: Island | null = map === "island" ? buildIsland({ lite: settings0.quality === "low" }) : null;
+  const island: Island | null = map === "island" ? buildIsland({ lite: lowEndDevice || settings0.quality === "low" }) : null;
   /** Battle royale warm-up: seconds left on the spawn island before everyone boards the drop ship (0 = over). */
   let preT = island ? Math.max(0, opts.pregame ?? 60) : 0;
   const spawnIsle = island && preT > 0 ? buildSpawnIsland() : null;
@@ -717,7 +717,7 @@ export function mountMatch(
   const stormFogColor = new THREE.Color(0x8a4fd0);
   if (island) {
     // big open island: see much further, and let the sky dome follow the camera
-    const far = settings0.renderDistance === "low" ? 190 : settings0.renderDistance === "high" ? 420 : 300;
+    const far = lowEndDevice || settings0.renderDistance === "low" ? 190 : settings0.renderDistance === "high" ? 420 : 300;
     islandFog = far;
     scene.fog = new THREE.Fog(0x8fcff5, far * 0.4, far);
     camera.far = 1200;
