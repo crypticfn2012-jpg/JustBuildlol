@@ -2958,8 +2958,10 @@ export function mountMatch(
    */
   let lookRot = 0;
   function facingRot(_ix?: number, _iz?: number) {
-    const fx = -Math.sin(camYaw);
-    const fz = -Math.cos(camYaw);
+    // Fortnite-style orientation follows the character's cardinal facing, while target position
+    // comes from the crosshair. The character already eases toward camera yaw during aiming.
+    const fx = -Math.sin(player.yaw);
+    const fz = -Math.cos(player.yaw);
     const ang = Math.atan2(fx, fz); // 0 = +z, +pi/2 = +x
     const cur = (lookRot * Math.PI) / 2;
     const off = Math.atan2(Math.sin(ang - cur), Math.cos(ang - cur));
@@ -3193,10 +3195,11 @@ export function mountMatch(
       // Walls sit on the near edge of the targeted grid cell. If the crosshair is on our current
       // tile (or behind us), move to the facing edge of the adjacent tile instead of putting a wall
       // behind the player. Orientation stays cardinal and follows the character/camera facing.
-      const forward = (targetX - pcx) * dx[d]! + (targetZ - pcz) * dz[d]!;
+      const wallDir = rot;
+      const forward = (targetX - pcx) * dx[wallDir]! + (targetZ - pcz) * dz[wallDir]!;
       if (forward <= 0) {
-        ix += dx[d]!;
-        iz += dz[d]!;
+        ix = pcx + dx[wallDir]!;
+        iz = pcz + dz[wallDir]!;
       }
     }
 
@@ -6523,10 +6526,10 @@ export function mountMatch(
     const buildLocked = !!duel && (duel.freeze > 0 || duel.over > 0);
     if (buildKind && editPiece < 0 && !buildLocked && (mouse.l || opts.pad.fire)) {
       placeHold += dt;
-      // Fortnite-like turbo building: place immediately, then repeat at a stable 10 builds/second.
-      if (placeHold === dt || placeHold >= 0.1) {
+      // Fortnite-like turbo building: place immediately, then repeat every 50 ms while held.
+      if (placeHold === dt || placeHold >= 0.05) {
         placePlayerBuild();
-        if (placeHold >= 0.1) placeHold %= 0.1;
+        if (placeHold >= 0.05) placeHold %= 0.05;
       }
     } else placeHold = 0;
     // hold to keep swinging, like Fortnite
