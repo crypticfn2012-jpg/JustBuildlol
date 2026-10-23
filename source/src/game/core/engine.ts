@@ -3090,77 +3090,179 @@ export function mountMatch(
    *  - floors, stairs and cones go on the square in front of you, or your own square when you look down
    *  - the level is the one you stand on (ground pieces sit on the terrain; up on builds they line up)
    */
-  function placement(): { ix: number; iy: number; iz: number; rot: number; base: number; ok: boolean; why: string } | null {
-    if (!buildKind || drop) return null;
-    const REACH = CELL * 1.9;
-    const d = facingRot(); // 0 +z, 1 +x, 2 -z, 3 -x
-    const DX = [0, 1, 0, -1];
-    const DZ = [1, 0, -1, 0];
-    const pcx = Math.floor(player.x / CELL);
-    const pcz = Math.floor(player.z / CELL);
-    const down = camPitch < -0.62;
-    let ix = pcx + DX[d]!;
-    let iz = pcz + DZ[d]!;
-    let why = "front";
-    if (buildKind !== "wall" && down) {
-      ix = pcx;
-      iz = pcz;
-      why = "under";
-    }
-    // a wall on the front edge of your square is the back edge of the square in front, facing you
-    let rot = buildKind === "wall" || buildKind === "ramp" ? d : 0;
-    rot = (rot + userRot) & 3;
-    let base = connectBase(ix, iz, buildKind, rot, 0);
-    // standing on stairs: the piece ahead in the way they climb goes off their top (ramp rushing); pieces
-    // to the sides or behind stay at the stairs' own level
-    let onStairs = false;
-    for (const p of cellPieces(pcx, pcz)) {
-      if (p.kind !== "ramp") continue;
-      if (player.y < p.base - 0.2 || player.y > p.base + CELL_H + 0.3) continue;
-      onStairs = true;
-      if (why !== "front") break;
-      if (!p.stair && p.mask === 0b1111 && p.rot === d) {
-        base = p.base + CELL_H;
-        why = "ramp-top";
-      } else {
-        base = p.base;
-        why = "ramp-side";
-      }
+  /**
+   * Resolve the crosshair to a world target, then snap the selected piece to the build grid.
+   * This deliberately uses the targeted surface rather than always placing one tile in front of
+   * the player. The preview and the actual placement call both use this exact result.
+   */
+  function buildAimPoint(): { x: number; y: number; z: number; distance: number; source: "build" | "ground" | "range" } {
+    viewRay(_rayO, _rayD);
+    const ox = _rayO.x;
+    const oy = _rayO.y;
+    const oz = _rayO.z;
+    const dx = _rayD.x;
+    const dy = _rayD.y;
+    const dz = _rayD.z;
+    const maxRange = CELL * 4;
+    let bestT = maxRange;
+    let bx = ox + dx * maxRange * 0.82;
+    let by = oy + dy * maxRange * 0.82;
+    let bz = oz + dz * maxRange * 0.82;
+    let source: "build" | "ground" | "range" = "range";
+
+    if (dirty && collisionSignature() !== collSig) rebuild();
+    raycaster.set(_v2.set(ox, oy, oz), _v1.set(dx, dy, dz));
+    raycaster.near = 0.05;
+    raycaster.far = maxRange;
+    const meshes = buildMeshes.filter((m) => m.count > 0 && m.visible);
+    const buildHits = raycaster.intersectObjects(meshes, false);
+    const lookingDown = camPitch < -0.55;
+    for (const h of buildHits) {
+      const index = pieceFromIntersect(h);
+      if (index < 0 || h.distance >= bestT) continue;
+      const p = pieces[index];
+      // Don't let the floor/ramp directly under the player hijack forward placement.
+      if (p && !lookingDown && underPlayer(p)) continue;
+      bestT = h.distance;
+      bx = h.point.x;
+      by = h.point.y;
+      bz = h.point.z;
+      source = "build";
       break;
     }
-    // a wall already on the edge you face (inside a box): floors, stairs and cones go in your own square
-    // instead of outside the wall
-    if (buildKind !== "wall" && why === "front" && wallOnEdge(ix, iz, d, player.y + 0.6)) {
-      ix = pcx;
-      iz = pcz;
-      why = "inside";
-      base = connectBase(ix, iz, buildKind, rot, 0);
+
+    const floorHits = raycaster.intersectObjects(groundMeshes, false);
+    if (floorHits[0] && floorHits[0].distance < bestT) {
+      const h = floorHits[0];
+      bestT = h.distance;
+      bx = h.point.x;
+      by = h.point.y;
+      bz = h.point.z;
+      source = "ground";
     }
-    // looking up builds on top of your builds: a roof over your head with floors and cones, and the next
-    // level up when the spot at your level is already built
-    if (!onStairs && (buildKind === "floor" || buildKind === "pyramid") && camPitch > 0.62) {
-      ix = pcx;
-      iz = pcz;
-      base = snapBase(player.y + 0.35) + CELL_H;
-      why = "roof";
-    } else if (camPitch > 0.18 && buildKind === "wall") {
-      // walls stack straight up on walls; stairs never pile up on stairs in mid-air
-      for (let k = 0; k < 2 && duplicate(buildKind, ix, iz, rot, base); k++) {
-        base += CELL_H;
-        why = "stack";
+
+    // The island's terrain is height-mapped rather than a raycast target. Find where the crosshair
+    // first crosses it. Use a bounded coarse march for performance; build meshes above it win.
+    if (island) {
+      const marchLimit = bestT;
+      let prevT = 0.25;
+      let prevGap = (oy + dy * prevT) - groundHeight(ox + dx * prevT, oz + dz * prevT);
+      for (let t = 0.5; t <= marchLimit; t += 0.5) {
+        const x = ox + dx * t;
+        const z = oz + dz * t;
+        const gy = groundHeight(x, z);
+        if (gy > -8) {
+          const gap = oy + dy * t - gy;
+          if (prevGap > 0 && gap <= 0 && t < bestT) {
+            const u = prevGap / Math.max(0.0001, prevGap - gap);
+            bestT = prevT + (t - prevT) * u;
+            bx = ox + dx * bestT;
+            by = oy + dy * bestT;
+            bz = oz + dz * bestT;
+            source = "ground";
+            break;
+          }
+          prevGap = gap;
+        } else {
+          prevGap = (oy + dy * t) - gy;
+        }
+        prevT = t;
       }
     }
-    const dist = Math.hypot((ix + 0.5) * CELL - player.x, (iz + 0.5) * CELL - player.z);
-    const iy = Math.round(base / CELL_H);
-    const ok =
-      dist <= REACH + CELL * 0.35 &&
-      playerSupport(buildKind, ix, iz, rot, base) &&
-      !duplicate(buildKind, ix, iz, rot, base) &&
-      (infinite || preT > 0 || mats[curMat] >= 10) &&
-      !overlapsPlayer(buildKind, ix, iz, base, rot);
-    return { ix, iy, iz, rot, base, ok, why };
+
+    return { x: bx, y: by, z: bz, distance: bestT, source };
   }
 
+  function placement(): { ix: number; iy: number; iz: number; rot: number; base: number; ok: boolean; why: string } | null {
+    if (!buildKind || drop) return null;
+    const target = buildAimPoint();
+    const pcx = Math.floor(player.x / CELL);
+    const pcz = Math.floor(player.z / CELL);
+    const targetX = Math.floor(target.x / CELL);
+    const targetZ = Math.floor(target.z / CELL);
+    const d = facingRot();
+    const dx = [0, 1, 0, -1];
+    const dz = [1, 0, -1, 0];
+
+    let ix = targetX;
+    let iz = targetZ;
+    let rot = buildKind === "wall" || buildKind === "ramp" ? d : 0;
+    rot = (rot + userRot) & 3;
+
+    if (buildKind === "wall") {
+      // Walls sit on the near edge of the targeted grid cell. If the crosshair is on our current
+      // tile (or behind us), move to the facing edge of the adjacent tile instead of putting a wall
+      // behind the player. Orientation stays cardinal and follows the character/camera facing.
+      const forward = (targetX - pcx) * dx[d]! + (targetZ - pcz) * dz[d]!;
+      if (forward <= 0) {
+        ix += dx[d]!;
+        iz += dz[d]!;
+      }
+    }
+
+    const fit = groundFit(buildKind, ix, iz, rot);
+    const centerY =
+      buildKind === "wall" ? CELL_H * 0.5 :
+      buildKind === "floor" ? TH * 0.5 :
+      buildKind === "pyramid" ? PYR_H * 0.45 : CELL_H * 0.42;
+    const targetBase = Math.round((target.y - centerY) / CELL_H) * CELL_H;
+    const levels = new Set<number>();
+    const addLevel = (v: number) => {
+      if (Number.isFinite(v) && v >= -0.45 && v <= player.y + CELL_H * 5 + 2) {
+        levels.add(Math.round(v * 1000) / 1000);
+      }
+    };
+
+    // Try the aimed vertical layer first, while retaining terrain and connected-build snap points.
+    for (let layer = -2; layer <= 2; layer++) addLevel(targetBase + layer * CELL_H);
+    if (fit > -8) addLevel(Math.max(0, fit));
+    addLevel(connectBase(ix, iz, buildKind, rot, 0));
+    addLevel(Math.round(player.y / CELL_H) * CELL_H);
+    addLevel(Math.round(player.y / CELL_H) * CELL_H + CELL_H);
+
+    // Neighbouring structures provide the same-height and top-edge snap points Fortnite-style
+    // building needs for ramp rushes, stacking walls, and continuing structures above ground.
+    for (const p of pieces) {
+      if (Math.abs(p.ix - ix) > 1 || Math.abs(p.iz - iz) > 1) continue;
+      addLevel(p.base);
+      if (p.kind !== "floor") addLevel(p.base + CELL_H);
+    }
+
+    const preferred = target.source === "ground" && fit > -8 ? Math.max(0, fit) : targetBase;
+    const orderedLevels = [...levels].sort((a, b) => Math.abs(a - preferred) - Math.abs(b - preferred));
+    const maxReach = CELL * 4.1;
+    let fallbackBase = orderedLevels[0] ?? (fit > -8 ? Math.max(0, fit) : targetBase);
+    let fallbackWhy = "support";
+
+    for (const base of orderedLevels) {
+      const [ax, az] = pieceAnchor(buildKind, ix, iz, rot);
+      if (Math.hypot(ax - player.x, az - player.z) > maxReach) {
+        fallbackWhy = "range";
+        continue;
+      }
+      const hasSupport = playerSupport(buildKind, ix, iz, rot, base);
+      const isDuplicate = duplicate(buildKind, ix, iz, rot, base);
+      const hasMaterials = infinite || preT > 0 || mats[curMat] >= 10;
+      const overlaps = overlapsPlayer(buildKind, ix, iz, base, rot);
+      if (hasSupport && !isDuplicate && hasMaterials && !overlaps) {
+        return {
+          ix, iy: Math.round(base / CELL_H), iz, rot, base, ok: true,
+          why: "valid",
+        };
+      }
+      if (Math.abs(base - preferred) < Math.abs(fallbackBase - preferred)) {
+        fallbackBase = base;
+        fallbackWhy = !hasSupport ? "support" : isDuplicate ? "occupied" : !hasMaterials ? "materials" : "blocked";
+      }
+    }
+
+    // Invalid previews stay at the intended snap point and turn red, rather than silently sliding
+    // into a different nearby cell that the player wasn't actually aiming at.
+    return {
+      ix, iy: Math.round(fallbackBase / CELL_H), iz, rot, base: fallbackBase, ok: false,
+      why: fallbackWhy,
+    };
+  }
   function showGhost() {
     const spot = buildKind && player.alive && !ended ? placement() : null;
     ghostWall.visible = false;
@@ -3436,7 +3538,7 @@ export function mountMatch(
       audio.play("edit");
       return;
     }
-    const own = pieceAimed(true);
+    const own = pieceAimed(true, true);
     if (own >= 0) {
       editPiece = own;
       editDrag = false;
@@ -3526,7 +3628,7 @@ export function mountMatch(
     const c = Math.cos(yaw);
     const s = Math.sin(yaw);
     let best = -1;
-    let bestD = 2.4;
+    let bestD = 1.0;
     const consider = (tile: number, x: number, y: number, z: number) => {
       const lx = x - ox;
       const ly = y - oy;
@@ -3691,27 +3793,8 @@ export function mountMatch(
     const edited = (p: Piece) => p.owner === 0 && (p.mask !== fullMask(p.kind) || !!p.stair);
     const i = pieceAimed(true, true);
     if (i >= 0 && edited(pieces[i]!)) return restoreFull(pieces[i]!);
-    // otherwise the edited build of yours closest to the line of sight
-    viewRay(_rayO, _rayD);
-    let best: Piece | null = null;
-    let bestD = 2.6;
-    for (const p of pieces) {
-      if (!edited(p)) continue;
-      const [ax, az] = pieceAnchor(p.kind, p.ix, p.iz, p.rot);
-      const ay = p.base + (p.kind === "floor" ? 0.2 : CELL_H / 2);
-      if (Math.hypot(ax - player.x, az - player.z) > CELL * 2.4) continue;
-      const lx = ax - _rayO.x;
-      const ly = ay - _rayO.y;
-      const lz = az - _rayO.z;
-      const t = lx * _rayD.x + ly * _rayD.y + lz * _rayD.z;
-      if (t < 0.3) continue;
-      const dd = Math.hypot(lx - _rayD.x * t, ly - _rayD.y * t, lz - _rayD.z * t);
-      if (dd < bestD) {
-        bestD = dd;
-        best = p;
-      }
-    }
-    return best ? restoreFull(best) : false;
+    // Scroll-wheel reset is intentionally crosshair-accurate: never reset a different nearby build.
+    return false;
   }
 
   function addBot(team: number, x: number, z: number, name: string, target = false) {
@@ -6703,7 +6786,7 @@ export function mountMatch(
         buildKind = null;
       }
     }
-    if (e.code === st.binds.edit || e.code === "KeyQ") toggleEdit();
+    if (e.code === st.binds.edit) toggleEdit();
     if (e.code === st.binds.resetEdit) {
       if (editPiece >= 0) {
         // reset the piece being edited and leave edit mode
